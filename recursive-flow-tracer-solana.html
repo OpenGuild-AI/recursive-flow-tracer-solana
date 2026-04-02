@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Solana Recursive Flow Tracer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'JetBrains Mono',monospace;background:#06090f;color:#e2e8f0;overflow-x:hidden}
+  
+  .app{display:grid;grid-template-columns:320px 1fr;height:100vh}
+  
+  /* LEFT SIDEBAR */
+  .sidebar{background:#0a0e1a;border-right:1px solid #1e293b;display:flex;flex-direction:column;overflow:hidden}
+  .sidebar-hdr{padding:16px;border-bottom:1px solid #1e293b}
+  .sidebar-hdr h1{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px}
+  .sidebar-hdr .root{font-size:10px;color:#22d3ee;word-break:break-all}
+  
+  .controls{padding:12px 16px;border-bottom:1px solid #1e293b;display:flex;flex-direction:column;gap:8px}
+  .controls label{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px}
+  .controls input,.controls select{background:#111827;border:1px solid #1e293b;color:#e2e8f0;font-family:inherit;font-size:11px;padding:6px 8px;border-radius:4px;width:100%}
+  .controls input:focus,.controls select:focus{outline:none;border-color:#22d3ee}
+  .btn{background:#1e293b;color:#e2e8f0;border:1px solid #334155;padding:8px 14px;border-radius:4px;font-family:inherit;font-size:11px;cursor:pointer;text-align:center}
+  .btn:hover{background:#334155}
+  .btn.primary{background:#0e4429;border-color:#22c55e44;color:#22c55e}
+  .btn.primary:hover{background:#166534}
+  .btn.danger{background:#1c1017;border-color:#7f1d1d;color:#fca5a5}
+  
+  .queue-section{padding:12px 16px;border-bottom:1px solid #1e293b;flex-shrink:0}
+  .queue-section h3{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+  .progress-bar{height:4px;background:#1e293b;border-radius:2px;margin:6px 0;overflow:hidden}
+  .progress-fill{height:100%;background:linear-gradient(90deg,#22d3ee,#a78bfa);border-radius:2px;transition:width .3s}
+  .queue-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px}
+  .queue-stat{text-align:center}
+  .queue-stat .n{font-size:16px;font-weight:600}
+  .queue-stat .l{font-size:8px;color:#64748b;text-transform:uppercase}
+  
+  .log-section{flex:1;overflow-y:auto;padding:8px 16px}
+  .log-section h3{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;position:sticky;top:0;background:#0a0e1a;padding:4px 0;z-index:1}
+  #log{font-size:10px;color:#94a3b8;white-space:pre-wrap;line-height:1.6}
+  .log-ok{color:#22c55e}
+  .log-warn{color:#fbbf24}
+  .log-err{color:#ef4444}
+  .log-info{color:#60a5fa}
+  .log-addr{color:#22d3ee}
+  
+  /* RIGHT MAIN */
+  .main{display:flex;flex-direction:column;overflow:hidden}
+  .main-hdr{padding:12px 20px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:12px;flex-shrink:0}
+  .main-tabs{display:flex;gap:2px}
+  .mtab{padding:6px 14px;font-size:11px;font-family:inherit;background:transparent;color:#64748b;border:1px solid transparent;border-radius:4px 4px 0 0;cursor:pointer;border-bottom:1px solid #334155}
+  .mtab.active{background:#1e293b;color:#e2e8f0;border-color:#334155;border-bottom-color:#1e293b}
+  .main-fill{flex:1;border-bottom:1px solid #334155}
+  .export-btn{margin-left:auto}
+  
+  .main-body{flex:1;overflow-y:auto;padding:20px}
+  
+  /* TREE VIEW */
+  .tree-node{margin-left:0;margin-bottom:2px}
+  .tree-node .node-row{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:11px;transition:background .15s}
+  .tree-node .node-row:hover{background:#111827}
+  .tree-node .node-row.active{background:#1e293b}
+  .node-toggle{width:16px;height:16px;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:10px;flex-shrink:0;cursor:pointer}
+  .node-depth{display:inline-block;border-left:1px solid #1e293b;margin-right:4px}
+  .node-icon{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .node-addr{color:#22d3ee;font-size:11px}
+  .node-sol{margin-left:auto;font-size:11px;font-weight:500}
+  .node-sol.inflow{color:#22c55e}
+  .node-sol.outflow{color:#ef4444}
+  .node-count{color:#64748b;font-size:10px;margin-left:8px}
+  .node-status{font-size:9px;padding:1px 6px;border-radius:3px;margin-left:6px}
+  .status-pending{background:#fbbf2422;color:#fbbf24;border:1px solid #fbbf2444}
+  .status-done{background:#22c55e22;color:#22c55e;border:1px solid #22c55e44}
+  .status-scanning{background:#60a5fa22;color:#60a5fa;border:1px solid #60a5fa44;animation:pulse 1s infinite}
+  .status-skipped{background:#64748b22;color:#64748b;border:1px solid #64748b44}
+  .tree-children{margin-left:20px;border-left:1px solid #1e293b22;padding-left:0}
+  
+  /* TABLE VIEW */
+  .flat-table{width:100%;border-collapse:collapse;font-size:11px}
+  .flat-table th{padding:8px 10px;text-align:left;color:#64748b;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #1e293b;position:sticky;top:0;background:#06090f;z-index:1}
+  .flat-table th.r{text-align:right}
+  .flat-table td{padding:6px 10px;border-bottom:1px solid #111827}
+  .flat-table td.r{text-align:right}
+  .flat-table tr:hover{background:#0d1220}
+  .flat-table .addr-link{color:#22d3ee;text-decoration:none}
+  .flat-table .depth-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600}
+  
+  /* DETAIL PANEL */
+  .detail-overlay{position:fixed;top:0;right:0;width:400px;height:100vh;background:#0a0e1a;border-left:1px solid #1e293b;z-index:100;overflow-y:auto;transform:translateX(100%);transition:transform .2s;padding:20px}
+  .detail-overlay.open{transform:translateX(0)}
+  .detail-close{position:absolute;top:12px;right:12px;background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;font-family:inherit}
+  .detail-close:hover{color:#e2e8f0}
+  
+  @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .spinner{display:inline-block;width:12px;height:12px;border:2px solid #334155;border-top-color:#22d3ee;border-radius:50%;animation:spin .6s linear infinite;margin-right:6px}
+  
+  ::-webkit-scrollbar{width:5px}
+  ::-webkit-scrollbar-track{background:#0a0e1a}
+  ::-webkit-scrollbar-thumb{background:#1e293b;border-radius:3px}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-hdr">
+      <h1>◆ Recursive Flow Tracer</h1>
+      <div class="root" id="rootAddr"></div>
+    </div>
+    
+    <div class="controls">
+      <div>
+        <label>Start Wallet</label>
+        <input type="text" id="inputWallet" value="">
+      </div>
+      <div>
+        <label>Helius API Key</label>
+        <input type="text" id="inputKey" value="">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div>
+          <label>Max Tiefe</label>
+          <select id="inputDepth">
+            <option value="1">1 Level</option>
+            <option value="2" selected>2 Levels</option>
+            <option value="3">3 Levels</option>
+            <option value="4">4 Levels</option>
+            <option value="5">5 Levels</option>
+          </select>
+        </div>
+        <div>
+          <label>Min SOL Filter</label>
+          <input type="number" id="inputMinSol" value="0.01" step="0.01" min="0">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div>
+          <label>Richtung</label>
+          <select id="inputDirection">
+            <option value="outflows" selected>Outflows folgen</option>
+            <option value="inflows">Inflows folgen</option>
+            <option value="both">Beides</option>
+          </select>
+        </div>
+        <div>
+          <label>Delay (ms)</label>
+          <input type="number" id="inputDelay" value="300" step="100" min="100">
+        </div>
+      </div>
+      <button class="btn primary" id="btnStart" onclick="startTrace()">▶ Trace starten</button>
+      <button class="btn danger" id="btnStop" onclick="stopTrace()" style="display:none">■ Stop</button>
+    </div>
+    
+    <div class="queue-section">
+      <h3>Scan Status</h3>
+      <div class="progress-bar"><div class="progress-fill" id="progBar" style="width:0%"></div></div>
+      <div class="queue-stats">
+        <div class="queue-stat"><div class="n" id="qDone" style="color:#22c55e">0</div><div class="l">Done</div></div>
+        <div class="queue-stat"><div class="n" id="qPending" style="color:#fbbf24">0</div><div class="l">Queue</div></div>
+        <div class="queue-stat"><div class="n" id="qTotal" style="color:#a78bfa">0</div><div class="l">Wallets</div></div>
+      </div>
+    </div>
+    
+    <div class="log-section">
+      <h3>Live Log</h3>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="main-hdr">
+      <div class="main-tabs">
+        <button class="mtab active" onclick="switchView('tree',this)">🌳 Tree</button>
+        <button class="mtab" onclick="switchView('table',this)">📊 Flat Table</button>
+        <button class="mtab" onclick="switchView('funders',this)">↓ Top Funders</button>
+      </div>
+      <div class="main-fill"></div>
+      <button class="btn export-btn" onclick="exportJSON()">💾 JSON Export</button>
+      <button class="btn export-btn" onclick="exportReport()">📋 Report</button>
+    </div>
+    <div class="main-body" id="mainBody">
+      <div style="text-align:center;color:#475569;padding:60px 20px">
+        <div style="font-size:32px;margin-bottom:12px">◆</div>
+        <div style="font-size:13px">Konfiguriere links und drücke "Trace starten"</div>
+        <div style="font-size:11px;margin-top:8px;color:#334155">Folgt rekursiv allen Geldflüssen bis zur eingestellten Tiefe</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-overlay" id="detailPanel">
+  <button class="detail-close" onclick="closeDetail()">✕</button>
+  <div id="detailContent"></div>
+</div>
+
+<script>
+// ═══ STATE ═══
+let graph = {};        // addr -> { depth, parent, inflows:{}, outflows:{}, txCount, scanned, scanning, txs[] }
+let queue = [];
+let scanning = false;
+let stopped = false;
+let currentView = 'tree';
+let ROOT = '';
+let API_KEY = '';
+let MAX_DEPTH = 2;
+let MIN_SOL = 0.01;
+let DIRECTION = 'outflows';
+let DELAY = 300;
+
+const short = a => a ? a.slice(0,6)+'…'+a.slice(-4) : '—';
+const solF = l => (l/1e9).toFixed(4);
+const dateF = ts => ts ? new Date(ts*1000).toLocaleString('de-CH',{dateStyle:'short',timeStyle:'short'}) : '—';
+
+function log(msg, cls='') {
+  const el = document.getElementById('log');
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = msg + '\n';
+  el.appendChild(span);
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateStats() {
+  const done = Object.values(graph).filter(n=>n.scanned).length;
+  const pending = queue.length;
+  const total = Object.keys(graph).length;
+  document.getElementById('qDone').textContent = done;
+  document.getElementById('qPending').textContent = pending;
+  document.getElementById('qTotal').textContent = total;
+  const pct = total > 0 ? (done/Math.max(done+pending,1))*100 : 0;
+  document.getElementById('progBar').style.width = pct+'%';
+}
+
+// ═══ FETCH ═══
+async function fetchTxs(addr) {
+  const base = `https://api-mainnet.helius-rpc.com/v0/addresses/${addr}/transactions?api-key=${API_KEY}`;
+  let all = [], before = null, pages = 0;
+  while (pages < 10) {
+    const url = before ? `${base}&limit=100&before=${before}` : `${base}&limit=100`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data || !Array.isArray(data) || data.length === 0) break;
+    all = all.concat(data);
+    before = data[data.length-1].signature;
+    pages++;
+    if (data.length < 100) break;
+  }
+  return all;
+}
+
+function analyzeTxs(addr, txs) {
+  const node = graph[addr];
+  node.txs = txs;
+  node.txCount = txs.length;
+  
+  txs.forEach(tx => {
+    (tx.nativeTransfers||[]).forEach(nt => {
+      // Inflows to this addr
+      if (nt.toUserAccount === addr && nt.amount > 0) {
+        const f = nt.fromUserAccount;
+        if (!f || f === addr) return;
+        if (!node.inflows[f]) node.inflows[f] = {sol:0,count:0,first:Infinity,last:0,txs:[]};
+        node.inflows[f].sol += nt.amount;
+        node.inflows[f].count++;
+        node.inflows[f].first = Math.min(node.inflows[f].first, tx.timestamp||0);
+        node.inflows[f].last = Math.max(node.inflows[f].last, tx.timestamp||0);
+        node.inflows[f].txs.push({sig:tx.signature,amt:nt.amount,ts:tx.timestamp,type:tx.type});
+      }
+      // Outflows from this addr
+      if (nt.fromUserAccount === addr && nt.amount > 0) {
+        const r = nt.toUserAccount;
+        if (!r || r === addr) return;
+        if (!node.outflows[r]) node.outflows[r] = {sol:0,count:0,first:Infinity,last:0,txs:[]};
+        node.outflows[r].sol += nt.amount;
+        node.outflows[r].count++;
+        node.outflows[r].first = Math.min(node.outflows[r].first, tx.timestamp||0);
+        node.outflows[r].last = Math.max(node.outflows[r].last, tx.timestamp||0);
+        node.outflows[r].txs.push({sig:tx.signature,amt:nt.amount,ts:tx.timestamp,type:tx.type});
+      }
+    });
+    // Token transfers
+    (tx.tokenTransfers||[]).forEach(tt => {
+      if (tt.toUserAccount === addr && tt.tokenAmount > 0 && tt.fromUserAccount && tt.fromUserAccount !== addr) {
+        const f = tt.fromUserAccount;
+        if (!node.inflows[f]) node.inflows[f] = {sol:0,count:0,first:Infinity,last:0,txs:[],tokens:{}};
+        if (!node.inflows[f].tokens) node.inflows[f].tokens = {};
+        node.inflows[f].tokens[tt.mint||'?'] = (node.inflows[f].tokens[tt.mint||'?']||0) + tt.tokenAmount;
+        node.inflows[f].count++;
+        node.inflows[f].first = Math.min(node.inflows[f].first, tx.timestamp||0);
+        node.inflows[f].txs.push({sig:tx.signature,amt:tt.tokenAmount,ts:tx.timestamp,type:tx.type,mint:tt.mint});
+      }
+      if (tt.fromUserAccount === addr && tt.tokenAmount > 0 && tt.toUserAccount && tt.toUserAccount !== addr) {
+        const r = tt.toUserAccount;
+        if (!node.outflows[r]) node.outflows[r] = {sol:0,count:0,first:Infinity,last:0,txs:[],tokens:{}};
+        if (!node.outflows[r].tokens) node.outflows[r].tokens = {};
+        node.outflows[r].tokens[tt.mint||'?'] = (node.outflows[r].tokens[tt.mint||'?']||0) + tt.tokenAmount;
+        node.outflows[r].count++;
+        node.outflows[r].first = Math.min(node.outflows[r].first, tx.timestamp||0);
+        node.outflows[r].txs.push({sig:tx.signature,amt:tt.tokenAmount,ts:tx.timestamp,type:tx.type,mint:tt.mint});
+      }
+    });
+  });
+}
+
+function enqueueChildren(addr) {
+  const node = graph[addr];
+  const nextDepth = node.depth + 1;
+  if (nextDepth > MAX_DEPTH) return;
+  
+  let targets = {};
+  if (DIRECTION === 'outflows' || DIRECTION === 'both') {
+    Object.entries(node.outflows).forEach(([a,d]) => {
+      if (d.sol/1e9 >= MIN_SOL) targets[a] = {sol:d.sol, dir:'outflow'};
+    });
+  }
+  if (DIRECTION === 'inflows' || DIRECTION === 'both') {
+    Object.entries(node.inflows).forEach(([a,d]) => {
+      if (d.sol/1e9 >= MIN_SOL) targets[a] = {sol:d.sol, dir:'inflow'};
+    });
+  }
+  
+  // Sort by SOL desc, take top 15 per level to avoid explosion
+  const sorted = Object.entries(targets).sort((a,b) => b[1].sol - a[1].sol).slice(0, 15);
+  
+  sorted.forEach(([a, info]) => {
+    if (!graph[a]) {
+      graph[a] = {depth:nextDepth, parent:addr, parentDir:info.dir, inflows:{}, outflows:{}, txCount:0, scanned:false, scanning:false, txs:[]};
+      queue.push(a);
+    }
+  });
+}
+
+// ═══ MAIN LOOP ═══
+async function processQueue() {
+  while (queue.length > 0 && !stopped) {
+    const addr = queue.shift();
+    if (graph[addr].scanned || graph[addr].scanning) continue;
+    
+    graph[addr].scanning = true;
+    const depth = graph[addr].depth;
+    log(`[D${depth}] Scanning ${short(addr)}…`, 'log-info');
+    updateStats();
+    renderView();
+    
+    try {
+      const txs = await fetchTxs(addr);
+      analyzeTxs(addr, txs);
+      graph[addr].scanned = true;
+      graph[addr].scanning = false;
+      
+      const outN = Object.keys(graph[addr].outflows).length;
+      const inN = Object.keys(graph[addr].inflows).length;
+      const totalOut = Object.values(graph[addr].outflows).reduce((s,v)=>s+v.sol,0);
+      const totalIn = Object.values(graph[addr].inflows).reduce((s,v)=>s+v.sol,0);
+      log(`  ✓ ${txs.length} txs | ↓${solF(totalIn)} SOL (${inN}) | ↑${solF(totalOut)} SOL (${outN})`, 'log-ok');
+      
+      enqueueChildren(addr);
+      updateStats();
+      renderView();
+      
+      // Rate limit
+      await new Promise(r => setTimeout(r, DELAY));
+    } catch(e) {
+      graph[addr].scanning = false;
+      graph[addr].scanned = true;
+      log(`  ✗ Error: ${e.message}`, 'log-err');
+    }
+  }
+  
+  if (!stopped) {
+    log(`\n════════════════════════════`, 'log-ok');
+    log(`SCAN COMPLETE`, 'log-ok');
+    log(`${Object.keys(graph).length} Wallets analysiert`, 'log-ok');
+    log(`════════════════════════════`, 'log-ok');
+  }
+  scanning = false;
+  document.getElementById('btnStart').style.display = '';
+  document.getElementById('btnStop').style.display = 'none';
+  updateStats();
+  renderView();
+}
+
+function startTrace() {
+  ROOT = document.getElementById('inputWallet').value.trim();
+  API_KEY = document.getElementById('inputKey').value.trim();
+  MAX_DEPTH = parseInt(document.getElementById('inputDepth').value);
+  MIN_SOL = parseFloat(document.getElementById('inputMinSol').value) || 0;
+  DIRECTION = document.getElementById('inputDirection').value;
+  DELAY = parseInt(document.getElementById('inputDelay').value) || 300;
+  
+  if (!ROOT || !API_KEY) { alert('Wallet und API Key benötigt!'); return; }
+  
+  graph = {};
+  queue = [];
+  stopped = false;
+  scanning = true;
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('rootAddr').textContent = ROOT;
+  document.getElementById('btnStart').style.display = 'none';
+  document.getElementById('btnStop').style.display = '';
+  
+  graph[ROOT] = {depth:0, parent:null, parentDir:null, inflows:{}, outflows:{}, txCount:0, scanned:false, scanning:false, txs:[]};
+  queue.push(ROOT);
+  
+  log(`◆ Recursive Flow Trace gestartet`, 'log-info');
+  log(`  Root: ${ROOT}`, 'log-addr');
+  log(`  Max Tiefe: ${MAX_DEPTH} | Min SOL: ${MIN_SOL} | Richtung: ${DIRECTION}`, '');
+  log(`  Delay: ${DELAY}ms | Top 15 pro Level`, '');
+  log(`${'─'.repeat(50)}`, '');
+  
+  processQueue();
+}
+
+function stopTrace() {
+  stopped = true;
+  log(`\n⚠ Scan gestoppt.`, 'log-warn');
+}
+
+// ═══ RENDERING ═══
+function switchView(view, btn) {
+  currentView = view;
+  document.querySelectorAll('.mtab').forEach(t=>t.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  renderView();
+}
+
+function renderView() {
+  const body = document.getElementById('mainBody');
+  if (currentView === 'tree') renderTree(body);
+  else if (currentView === 'table') renderTable(body);
+  else if (currentView === 'funders') renderFunders(body);
+}
+
+function renderTree(el) {
+  if (!graph[ROOT]) { el.innerHTML = '<div style="color:#475569;padding:40px;text-align:center">Kein Daten</div>'; return; }
+  el.innerHTML = buildTreeHTML(ROOT, 0);
+}
+
+function buildTreeHTML(addr, depth) {
+  const node = graph[addr];
+  if (!node) return '';
+  
+  const depthColors = ['#22d3ee','#a78bfa','#f472b6','#fbbf24','#34d399','#fb923c'];
+  const color = depthColors[depth % depthColors.length];
+  
+  let status = '';
+  if (node.scanning) status = '<span class="node-status status-scanning"><span class="spinner"></span>scanning</span>';
+  else if (node.scanned) status = `<span class="node-status status-done">✓ ${node.txCount} txs</span>`;
+  else if (queue.includes(addr)) status = '<span class="node-status status-pending">pending</span>';
+  else status = '<span class="node-status status-skipped">—</span>';
+  
+  const totalOut = Object.values(node.outflows).reduce((s,v)=>s+v.sol,0);
+  const totalIn = Object.values(node.inflows).reduce((s,v)=>s+v.sol,0);
+  
+  // Find how much SOL flowed from parent
+  let parentFlow = '';
+  if (node.parent && graph[node.parent]) {
+    const pn = graph[node.parent];
+    if (node.parentDir === 'outflow' && pn.outflows[addr]) {
+      parentFlow = `<span class="node-sol outflow">↑${solF(pn.outflows[addr].sol)}</span>`;
+    } else if (node.parentDir === 'inflow' && pn.inflows[addr]) {
+      parentFlow = `<span class="node-sol inflow">↓${solF(pn.inflows[addr].sol)}</span>`;
+    }
+  }
+  
+  let childAddrs = [];
+  if (DIRECTION === 'outflows' || DIRECTION === 'both') {
+    Object.keys(node.outflows).forEach(a => { if (graph[a] && graph[a].parent === addr) childAddrs.push(a); });
+  }
+  if (DIRECTION === 'inflows' || DIRECTION === 'both') {
+    Object.keys(node.inflows).forEach(a => { if (graph[a] && graph[a].parent === addr) childAddrs.push(a); });
+  }
+  childAddrs = [...new Set(childAddrs)];
+  
+  const hasChildren = childAddrs.length > 0;
+  
+  let html = `<div class="tree-node">`;
+  html += `<div class="node-row" onclick="showDetail('${addr}')">`;
+  html += `<span class="node-toggle">${hasChildren ? '▼' : '·'}</span>`;
+  html += `<span class="node-icon" style="background:${color}"></span>`;
+  html += `<span class="node-addr">${depth===0?'🎯 ':''}${short(addr)}</span>`;
+  html += parentFlow;
+  if (depth===0) html += `<span class="node-count" style="color:#22c55e">↓${solF(totalIn)}</span><span class="node-count" style="color:#ef4444">↑${solF(totalOut)}</span>`;
+  html += status;
+  html += `</div>`;
+  
+  if (hasChildren) {
+    html += `<div class="tree-children">`;
+    // Sort children by flow amount
+    childAddrs.sort((a,b) => {
+      const aFlow = (node.outflows[a]?.sol||0) + (node.inflows[a]?.sol||0);
+      const bFlow = (node.outflows[b]?.sol||0) + (node.inflows[b]?.sol||0);
+      return bFlow - aFlow;
+    });
+    childAddrs.forEach(c => { html += buildTreeHTML(c, depth+1); });
+    html += `</div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function renderTable(el) {
+  const rows = [];
+  Object.entries(graph).forEach(([addr, node]) => {
+    const totalOut = Object.values(node.outflows).reduce((s,v)=>s+v.sol,0);
+    const totalIn = Object.values(node.inflows).reduce((s,v)=>s+v.sol,0);
+    rows.push({addr, depth:node.depth, txCount:node.txCount, totalIn, totalOut, scanned:node.scanned, outCount:Object.keys(node.outflows).length, inCount:Object.keys(node.inflows).length});
+  });
+  rows.sort((a,b) => a.depth - b.depth || b.totalOut - a.totalOut);
+  
+  const depthColors = ['#22d3ee','#a78bfa','#f472b6','#fbbf24','#34d399','#fb923c'];
+  
+  let html = '<table class="flat-table"><thead><tr>';
+  html += '<th>Depth</th><th>Address</th><th class="r">Inflow SOL</th><th class="r">Outflow SOL</th><th class="r">Txs</th><th class="r">In/Out Addrs</th><th>Status</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    const c = depthColors[r.depth % depthColors.length];
+    html += `<tr onclick="showDetail('${r.addr}')" style="cursor:pointer">`;
+    html += `<td><span class="depth-badge" style="background:${c}22;color:${c};border:1px solid ${c}44">D${r.depth}</span></td>`;
+    html += `<td><a class="addr-link" href="https://solscan.io/account/${r.addr}" target="_blank" onclick="event.stopPropagation()">${short(r.addr)}</a></td>`;
+    html += `<td class="r" style="color:#22c55e">${solF(r.totalIn)}</td>`;
+    html += `<td class="r" style="color:#ef4444">${solF(r.totalOut)}</td>`;
+    html += `<td class="r" style="color:#94a3b8">${r.txCount}</td>`;
+    html += `<td class="r" style="color:#64748b">${r.inCount} / ${r.outCount}</td>`;
+    html += `<td>${r.scanned ? '<span style="color:#22c55e">✓</span>' : '<span style="color:#fbbf24">…</span>'}</td>`;
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function renderFunders(el) {
+  // Aggregate all unique funder wallets across the entire graph
+  const allFunders = {};
+  Object.entries(graph).forEach(([addr, node]) => {
+    Object.entries(node.inflows).forEach(([funder, data]) => {
+      if (!graph[funder]) { // External funder (not in our scan graph)
+        if (!allFunders[funder]) allFunders[funder] = {sol:0, count:0, targets:[], first:Infinity};
+        allFunders[funder].sol += data.sol;
+        allFunders[funder].count += data.count;
+        allFunders[funder].targets.push(addr);
+        allFunders[funder].first = Math.min(allFunders[funder].first, data.first);
+      }
+    });
+  });
+  
+  const sorted = Object.entries(allFunders).sort((a,b) => b[1].sol - a[1].sol);
+  
+  let html = `<div style="margin-bottom:16px;font-size:12px;color:#64748b">${sorted.length} externe Funder-Wallets gefunden (nicht im Scan-Graph)</div>`;
+  html += '<table class="flat-table"><thead><tr>';
+  html += '<th>#</th><th>Funder Address</th><th class="r">Total SOL</th><th class="r">Txs</th><th>Funded Targets</th><th class="r">First Seen</th></tr></thead><tbody>';
+  sorted.forEach(([addr, data], i) => {
+    html += `<tr>`;
+    html += `<td style="color:#64748b">${i+1}</td>`;
+    html += `<td><a class="addr-link" href="https://solscan.io/account/${addr}" target="_blank">${short(addr)}</a></td>`;
+    html += `<td class="r" style="color:#22c55e;font-weight:600">${solF(data.sol)}</td>`;
+    html += `<td class="r" style="color:#94a3b8">${data.count}</td>`;
+    html += `<td style="font-size:10px;color:#a78bfa">${[...new Set(data.targets)].map(short).join(', ')}</td>`;
+    html += `<td class="r" style="color:#64748b;font-size:10px">${data.first<Infinity?dateF(data.first):'—'}</td>`;
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ═══ DETAIL PANEL ═══
+function showDetail(addr) {
+  const node = graph[addr];
+  if (!node) return;
+  const panel = document.getElementById('detailPanel');
+  const content = document.getElementById('detailContent');
+  
+  const totalOut = Object.values(node.outflows).reduce((s,v)=>s+v.sol,0);
+  const totalIn = Object.values(node.inflows).reduce((s,v)=>s+v.sol,0);
+  
+  let html = `<div style="margin-bottom:16px">`;
+  html += `<div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Wallet Detail — Depth ${node.depth}</div>`;
+  html += `<div style="font-size:11px;color:#22d3ee;word-break:break-all;margin-bottom:8px">${addr}</div>`;
+  html += `<a href="https://solscan.io/account/${addr}" target="_blank" style="color:#60a5fa;font-size:11px;text-decoration:none">→ Solscan</a>`;
+  html += `</div>`;
+  
+  html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">`;
+  html += `<div style="background:#111827;border-radius:4px;padding:10px"><div style="font-size:8px;color:#64748b;text-transform:uppercase">Inflow</div><div style="font-size:16px;font-weight:600;color:#22c55e">${solF(totalIn)} SOL</div><div style="font-size:10px;color:#64748b">${Object.keys(node.inflows).length} addrs</div></div>`;
+  html += `<div style="background:#111827;border-radius:4px;padding:10px"><div style="font-size:8px;color:#64748b;text-transform:uppercase">Outflow</div><div style="font-size:16px;font-weight:600;color:#ef4444">${solF(totalOut)} SOL</div><div style="font-size:10px;color:#64748b">${Object.keys(node.outflows).length} addrs</div></div>`;
+  html += `</div>`;
+  
+  // Top Inflows
+  const sortedIn = Object.entries(node.inflows).sort((a,b)=>b[1].sol-a[1].sol).slice(0,20);
+  if (sortedIn.length) {
+    html += `<div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin:12px 0 6px">Top Inflows</div>`;
+    sortedIn.forEach(([a,d]) => {
+      const inGraph = graph[a] ? ' 🔍' : '';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #111827;font-size:11px">`;
+      html += `<a href="https://solscan.io/account/${a}" target="_blank" style="color:#22d3ee;text-decoration:none">${short(a)}${inGraph}</a>`;
+      html += `<span style="color:#22c55e">${solF(d.sol)} SOL (${d.count}x)</span></div>`;
+    });
+  }
+  
+  // Top Outflows
+  const sortedOut = Object.entries(node.outflows).sort((a,b)=>b[1].sol-a[1].sol).slice(0,20);
+  if (sortedOut.length) {
+    html += `<div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin:12px 0 6px">Top Outflows</div>`;
+    sortedOut.forEach(([a,d]) => {
+      const inGraph = graph[a] ? ' 🔍' : '';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #111827;font-size:11px">`;
+      html += `<a href="https://solscan.io/account/${a}" target="_blank" style="color:#22d3ee;text-decoration:none">${short(a)}${inGraph}</a>`;
+      html += `<span style="color:#ef4444">${solF(d.sol)} SOL (${d.count}x)</span></div>`;
+    });
+  }
+  
+  content.innerHTML = html;
+  panel.classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('open');
+}
+
+// ═══ EXPORT ═══
+function exportJSON() {
+  const data = JSON.stringify(graph, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `flow-trace-${short(ROOT)}-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+function exportReport() {
+  let r = `RECURSIVE FLOW TRACE REPORT\n${'═'.repeat(60)}\n`;
+  r += `Root: ${ROOT}\nMax Depth: ${MAX_DEPTH} | Min SOL: ${MIN_SOL} | Direction: ${DIRECTION}\n`;
+  r += `Wallets scanned: ${Object.values(graph).filter(n=>n.scanned).length}\n`;
+  r += `Total wallets discovered: ${Object.keys(graph).length}\n\n`;
+  
+  Object.entries(graph).sort((a,b)=>a[1].depth-b[1].depth).forEach(([addr, node]) => {
+    const totalOut = Object.values(node.outflows).reduce((s,v)=>s+v.sol,0);
+    const totalIn = Object.values(node.inflows).reduce((s,v)=>s+v.sol,0);
+    r += `${'─'.repeat(50)}\n`;
+    r += `[D${node.depth}] ${addr}\n`;
+    r += `  Txs: ${node.txCount} | In: ${solF(totalIn)} SOL | Out: ${solF(totalOut)} SOL\n`;
+    if (node.parent) r += `  Parent: ${node.parent} (${node.parentDir})\n`;
+    
+    const topOut = Object.entries(node.outflows).sort((a,b)=>b[1].sol-a[1].sol).slice(0,5);
+    if (topOut.length) {
+      r += `  Top Outflows:\n`;
+      topOut.forEach(([a,d]) => r += `    → ${a}: ${solF(d.sol)} SOL (${d.count}x)\n`);
+    }
+    const topIn = Object.entries(node.inflows).sort((a,b)=>b[1].sol-a[1].sol).slice(0,5);
+    if (topIn.length) {
+      r += `  Top Inflows:\n`;
+      topIn.forEach(([a,d]) => r += `    ← ${a}: ${solF(d.sol)} SOL (${d.count}x)\n`);
+    }
+  });
+  
+  navigator.clipboard.writeText(r).then(()=>alert('Report in Zwischenablage kopiert!')).catch(()=>{
+    const ta=document.createElement('textarea');ta.value=r;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);alert('Report kopiert!');
+  });
+}
+</script>
+</body>
+</html>
